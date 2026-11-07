@@ -32,6 +32,13 @@ npm install && npm test && npm run selftest && npm run build
 - `npm test`：10 个单测（快照完整/frontmatter/脚本齐备/addendum 三条/分镜示例/AGPL 引擎不入快照）
 - `npm run selftest`：快照+provider+面板 API+引擎声明+人类闸门，零网络
 
+
+## 安装
+
+```bash
+dsh plugin --profile web add dsh-whiteboard-video
+```
+
 ## 许可
 
 - 插件壳代码（src/lib/client/scripts）：**MIT**（liangdabiao）
