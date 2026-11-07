@@ -112,3 +112,54 @@ test('MIT LICENSE 在快照根（技能本体许可）', () => {
   assert.match(text, /MIT/)
   assert.match(text, /liangdabiao/)
 })
+
+// ── 升级新增：project + storyboard 工具 ────────────────────
+process.env.DSH_HOME = new URL('../.tmp/test-home/', import.meta.url).pathname.replace(/^\/([A-Za-z]):/, '$1:')
+
+const data = await import('../lib/data.js')
+const host = await import('../src/host.js')
+
+test('data: 制作清单 init/冲突/更新/清空 + 分镜校验', () => {
+  data.clearProject()
+  const p = data.initProject('测试视频', undefined, false)
+  assert.equal(p.items.length, 6)
+  const conflict = data.initProject('另一个', undefined, false)
+  assert.equal(conflict.conflict, true)
+  const item = data.updateStage(2, { status: 'done', note: '分镜完成' })
+  assert.equal(item.status, 'done')
+  data.clearProject()
+  assert.equal(data.getProject().items.length, 0)
+  // 分镜校验
+  const bad = data.validateStoryboard({ pages: [{ elements: [] }, {}] })
+  assert.equal(bad.ok, false)
+  assert.ok(bad.errors.length >= 2, '两页都缺 narration')
+  const good = data.validateStoryboard({ title: 't', pages: [{ narration: '你好', elements: [] }, { narration: '世界', content: 'x' }] })
+  assert.equal(good.ok, true)
+  assert.equal(good.stats.narrated, 2)
+})
+
+test('host: 2 个工具 schema + project/storyboard 全链路', async () => {
+  for (const tool of [host.whiteboardProjectTool, host.whiteboardStoryboardTool]) {
+    assert.equal(tool.parameters.additionalProperties, false)
+    assert.ok(tool.description.length > 30)
+  }
+  await assert.rejects(() => host.whiteboardProjectTool.execute({ action: 'list', bogus: 1 }), /未知参数/)
+  host.apply(
+    { effect: (fn) => { try { fn() } catch {} }, tools: { register: () => {} }, skills: { registerProvider: () => {} }, webServer: { register: () => {} } },
+    {})
+  const init = await host.whiteboardProjectTool.execute({ action: 'init', title: '勾股定理' })
+  assert.equal(init.ok, true)
+  const st = await host.whiteboardProjectTool.execute({ action: 'status', index: 1, status: 'done', note: '脚本好了' })
+  assert.ok(st.summary.includes('done'))
+  const list = await host.whiteboardProjectTool.execute({ action: 'list' })
+  assert.ok(list.summary.includes('1/6'))
+  const boards = await host.whiteboardStoryboardTool.execute({ action: 'list' })
+  assert.equal(boards.ok, true)
+  assert.ok(boards.data.includes('storyboard-'))
+  const bad = await host.whiteboardStoryboardTool.execute({ action: 'validate', json: '{"pages":[{}]}' })
+  assert.equal(bad.ok, false)
+  const good = await host.whiteboardStoryboardTool.execute({ action: 'validate', json: '{"title":"t","pages":[{"narration":"a","elements":[]}]}' })
+  assert.equal(good.ok, true)
+  const noConfirm = await host.whiteboardProjectTool.execute({ action: 'clear' })
+  assert.equal(noConfirm.ok, false)
+})

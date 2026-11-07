@@ -1,7 +1,7 @@
 {
   "name": "dsh-whiteboard-video",
-  "version": "0.1.0",
-  "description": "手绘讲解视频技能：把讲解稿变成「手绘会动的画面」讲解视频——代码逐笔绘制、文字逐字写出、讲到哪画到哪，五套风格，零生图 API 成本，秒级重渲。",
+  "version": "0.2.0",
+  "description": "手绘讲解视频工作台：whiteboard_project 制作进度持久化（6 阶段管线）+ whiteboard_storyboard 分镜样例查询与结构校验。侧栏制作进度面板。",
   "license": "MIT",
   "type": "module",
   "main": "src/host.js",

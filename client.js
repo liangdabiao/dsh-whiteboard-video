@@ -16,6 +16,43 @@ function PanelIcon(props) {
     h('path', { d: 'M8 17l-1 3 3-1.5', stroke: '#ffd24a', 'stroke-width': 1.5, 'stroke-linecap': 'round', 'stroke-linejoin': 'round' }))
 }
 
+
+// ---------- 制作进度 ----------
+const STATUS_STYLE = {
+  todo: ['#8a8a92', '○ 待做'],
+  doing: ['#b58a00', '◐ 进行中'],
+  done: ['#1a7f37', '✓ 完成'],
+}
+
+function ProgressTab() {
+  const [project, setProject] = useState(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    fetchJson('/api/project').then((d) => setProject(d.project)).catch((e) => setError(e.message))
+  }, [])
+  if (error) return h('div', { style: styles.error }, error)
+  if (project === null) return h('div', { style: styles.muted }, '加载中…')
+  if (!project.items.length) {
+    return h('div', { style: styles.muted },
+      '还没有制作清单。在对话里说「做一个讲勾股定理的白板动画视频」，模型会 init 6 阶段管线并逐阶段推进。')
+  }
+  const done = project.items.filter((it) => it.status === 'done').length
+  const pct = Math.round((done / project.items.length) * 100)
+  return h('div', null,
+    h('div', { style: styles.card },
+      h('div', { style: styles.sectionTitle }, '🎬 ' + (project.title || '未命名') + ' 制作进度'),
+      h('div', { style: styles.mutedSmall }, done + '/' + project.items.length + ' 完成（' + pct + '%）'),
+      h('div', { style: styles.barWrap }, h('div', { style: { ...styles.bar, width: pct + '%' } }))),
+    h('div', { style: styles.card },
+      project.items.map((it) => {
+        const [color, label] = STATUS_STYLE[it.status] || STATUS_STYLE.todo
+        return h('div', { key: it.index, style: styles.item },
+          h('span', { style: { color, fontSize: 12, fontWeight: 700, minWidth: 66 } }, label),
+          h('span', { style: styles.itemTitle }, it.index + '. ' + it.stage),
+          it.note ? h('div', { style: styles.mutedSmall }, it.note) : null)
+      })))
+}
+
 // ---------- 使用指南 ----------
 function GuideTab() {
   return h('div', null,
@@ -67,15 +104,21 @@ async function fetchJson(path) {
 
 // ---------- 主面板 ----------
 function Panel() {
-  const [tab, setTab] = useState('guide')
+  const [tab, setTab] = useState('progress')
   return h('div', { style: styles.wrap },
     h('div', { style: styles.row },
+      h('button', { style: tab === 'progress' ? styles.tabActive : styles.tab, onClick: () => setTab('progress') }, '📊 制作进度'),
       h('button', { style: tab === 'guide' ? styles.tabActive : styles.tab, onClick: () => setTab('guide') }, '📖 使用指南'),
       h('button', { style: tab === 'storyboards' ? styles.tabActive : styles.tab, onClick: () => setTab('storyboards') }, '🎬 分镜示例')),
-    tab === 'guide' ? h(GuideTab) : h(StoryboardsTab))
+    tab === 'progress' ? h(ProgressTab) : tab === 'guide' ? h(GuideTab) : h(StoryboardsTab))
 }
 
 const styles = {
+  mutedSmall: { color: '#a0a0a8', fontSize: 12, lineHeight: 1.7 },
+  barWrap: { background: '#eee', borderRadius: 999, height: 8, marginTop: 8, overflow: 'hidden' },
+  bar: { background: '#2d5d8f', height: '100%', borderRadius: 999, transition: 'width .3s' },
+  item: { padding: '6px 0', borderBottom: '1px solid #f0f0f2' },
+  itemTitle: { fontSize: 12.5 },
   wrap: { padding: 16, overflow: 'auto', height: '100%', boxSizing: 'border-box', fontFamily: '-apple-system, "Segoe UI", "Microsoft YaHei", sans-serif', fontSize: 13, color: '#1a1a1a' },
   row: { display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap', marginBottom: 10 },
   button: { padding: '6px 14px', border: 'none', borderRadius: 8, background: '#2d5d8f', color: '#fff', cursor: 'pointer', fontSize: 13 },
