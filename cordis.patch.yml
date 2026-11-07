@@ -1,0 +1,5 @@
+# 手绘讲解视频：技能快照（SKILL.md + references + scripts + 分镜示例）。
+# 浏览器半边由 dsh.client 声明加载（./client → dist/client.js）。
+- insert:
+    - id: whiteboard-video
+      name: 'dsh-whiteboard-video'
