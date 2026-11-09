@@ -4,6 +4,9 @@ DeepSeek Harness（dsh）插件：**图文讲解视频技能**——把讲解稿
 
 技能本体来自 [whiteboard-teacher-video](https://github.com/liangdabiao/whiteboard-teacher-video)（MIT，liangdabiao）。B 站效果示例：[GPS 是怎么工作的](https://www.bilibili.com/video/BV1mpn96UE7B/) · [勾股定理证明](https://www.bilibili.com/video/BV1yYJ46PE5R/) · [财务报表解释](https://www.bilibili.com/video/BV1U2xY6gEto/)
 
+
+<img width="1617" height="1041" alt="image" src="https://github.com/user-attachments/assets/69035fbb-51a0-455a-adfb-f3bb1e927d71" />
+
 ## 装上以后有什么
 
 | 能力 | 说明 |
