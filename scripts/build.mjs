@@ -9,24 +9,29 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const PLUGIN_ID = pkg.name
 
-// 幂等包装：同一个 bundle 被第二次执行时直接跳过。
-// 背景：宿主在「预加载 + 延迟服务就绪后再加载」这类组合下可能把同一个 bundle 执行两次，
+// 注册包装：只吞掉「duplicate factory registration」，不阻断重新注册。
+// 背景：宿主在「预加载 + 延迟加载」或 disable→enable 时会重新执行同一个 bundle，
 // client-modules 会以 duplicate factory registration 抛错并让整个 web boot 失败。
-// 包一层 Set 守卫后，重复执行变成无操作，宿主那边仍能查到第一次注册的 factory。
-const guard = `window.__dshLoadedIds = window.__dshLoadedIds || new Set();` +
-  ` if (!window.__dshLoadedIds.has(${JSON.stringify(PLUGIN_ID)})) { window.__dshLoadedIds.add(${JSON.stringify(PLUGIN_ID)});`
+// 注意：不能用 `if (!loadedIds.has(id))` 直接跳过——插件被 disable→enable 后宿主会
+// 重新执行 bundle，跳过会让面板永久回不来（实测踩过，左侧图标消失）。
+// 这里改为：调用 load，若只是重复注册就忽略；若 factory 已被 invalidate，load 会正常
+// 重新注册，面板恢复。
 const banner =
-  guard +
-  ` window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {` +
+  `(function () {\n` +
+  `  const register = (entry) => {\n` +
+  `    try { window.__ModuleLoader__.load(entry) }\n` +
+  `    catch (err) { if (!err || !/duplicate factory registration/.test(String((err && err.message) || err))) throw err }\n` +
+  `  };\n` +
+  `  register({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {\n` +
   ` const module = { exports: {} }; const exports = module.exports;`
-const footer = ' return module.exports; } }); }'
+const footer = ' return module.exports; } }); })();\n'
 
 const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client']
 
 function checkBundle() {
   const code = readFileSync(join(root, 'dist/client.js'), 'utf8')
-  if (!code.startsWith('window.__dshLoadedIds')) {
-    throw new Error('client 产物缺少重复执行守卫（宿主可能二次执行同一 bundle）')
+  if (!code.startsWith('(function () {') || !code.includes('duplicate factory registration')) {
+    throw new Error('client 产物缺少重复注册容错包装（disable→enable 后需要能重新注册）')
   }
   const requires = [...code.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1])
   const bad = requires.filter((spec) => !CLIENT_EXTERNALS.includes(spec))
