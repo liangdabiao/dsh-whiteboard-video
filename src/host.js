@@ -1,7 +1,7 @@
 // 手绘讲解视频 · Host 半边（技能提供方 + whiteboard_project/whiteboard_storyboard 原生工具 + 面板数据面）。
 // 渲染管线由模型在工作区副本里用 bash 驱动（python scripts/ft*.py），Host 不参与重活。
 import Schema from '@deepseek-ai/schemastery'
-import { join, dirname } from 'node:path'
+import { join, dirname, basename } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { createSkillProvider, listStoryboards } from '../lib/skills.js'
 import { registerApi } from '../lib/api.js'
@@ -109,8 +109,8 @@ export const whiteboardProjectTool = {
 export const whiteboardStoryboardTool = {
   name: 'whiteboard_storyboard',
   description:
-    '查询内置分镜样例（list/get）或校验你写好的分镜 JSON（validate：逐页检查 narration 配音文本与画面元素是否齐全，' +
-    '渲染前跑一遍能提前发现漏页/漏配音问题）。',
+    '查询内置分镜样例（list/get）或校验你写好的分镜 JSON（validate：逐页检查口播 pages[].say 与画面 beats 是否齐全，' +
+    '渲染前跑一遍能提前发现漏页/漏口播问题）。',
   parameters: {
     type: 'object',
     additionalProperties: false,
@@ -133,14 +133,16 @@ export const whiteboardStoryboardTool = {
     }
     if (args.action === 'get') {
       if (!args.file) throw new Error('get 需要 file（先 list 找到样例文件名）。')
+      const name = basename(args.file) // 只允许样例文件名，防止 ../ 越权读取
+      if (name !== args.file) throw new Error('file 只能是 list 里的样例文件名，不能带路径。')
       const { readFileSync, existsSync } = await import('node:fs')
       for (const dir of [].concat(skillDirs)) {
-        const file = join(dir, 'assets', args.file)
+        const file = join(dir, 'assets', name)
         if (existsSync(file)) {
-          return result(true, `样例 ${args.file}（照此结构写你自己的分镜 JSON）：`, readFileSync(file, 'utf8').slice(0, 12000))
+          return result(true, `样例 ${name}（照此结构写你自己的分镜 JSON）：`, readFileSync(file, 'utf8').slice(0, 12000))
         }
       }
-      return result(false, `没有找到样例 ${args.file}。`)
+      return result(false, `没有找到样例 ${name}。`)
     }
     // validate
     if (!args.json) throw new Error('validate 需要 json（分镜 JSON 字符串）。')
@@ -159,11 +161,13 @@ export const whiteboardStoryboardTool = {
 const skillDirsRef = { dirs: [] }
 
 export function apply(ctx, config) {
-  const skillDirs = [join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'whiteboard-teacher-video')]
+  const skillsRoot = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills')
+  const skillDirs = [join(skillsRoot, 'whiteboard-teacher-video')]
   skillDirsRef.dirs = skillDirs
 
   ctx.effect(() => ctx.tools.register(whiteboardProjectTool), `${name}: tool project`)
   ctx.effect(() => ctx.tools.register(whiteboardStoryboardTool), `${name}: tool storyboard`)
-  ctx.effect(() => ctx.skills.registerProvider(() => createSkillProvider(skillDirs)), `${name}: skills`)
+  // provider 要扫「包含技能子目录的根」，而 assets 读取要具体技能目录，两者不能混用。
+  ctx.effect(() => ctx.skills.registerProvider(() => createSkillProvider(skillsRoot)), `${name}: skills`)
   ctx.effect(() => registerApi(ctx, { skillDirs }), `${name}: routes`)
 }

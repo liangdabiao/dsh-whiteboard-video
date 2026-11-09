@@ -66,6 +66,26 @@ await step('面板 API 健康与分镜接口（内存 ctx 模拟）', async () =
   if (JSON.parse(captured.at(-1)).storyboards.length < 10) throw new Error('分镜接口数量不对')
 })
 
+await step('host.apply：技能 provider 扫对根 + 2 个工具注册', async () => {
+  const { apply } = await import('../src/host.js')
+  const tools = []
+  let providerFactory
+  apply({
+    effect: (fn) => fn(),
+    tools: { register: (tool) => tools.push(tool.name) },
+    skills: { registerProvider: (factory) => { providerFactory = factory } },
+    webServer: { register: () => {} },
+  }, {})
+  if (tools.length !== 2) throw new Error(`工具数 ${tools.length} ≠ 2`)
+  if (typeof providerFactory !== 'function') throw new Error('未注册 skill provider')
+  const provider = providerFactory()
+  const list = await provider.list()
+  const hit = list.find((s) => s.name === 'whiteboard-teacher-video')
+  if (!hit) throw new Error('技能未注册（provider 扫描根可能传错）')
+  const skill = await provider.get(hit)
+  if (!skill.content.includes('cp -r')) throw new Error('技能正文缺 addendum')
+})
+
 await step('AGPL 引擎声明存在且引擎不入快照', () => {
   const attr = readFileSync(join(SKILL_DIR, 'vendor', 'ATTRIBUTION.md'), 'utf8')
   if (!attr.includes('AGPL')) throw new Error('ATTRIBUTION 应声明引擎 AGPL')

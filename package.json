@@ -1,6 +1,6 @@
 {
   "name": "dsh-whiteboard-video",
-  "version": "0.2.0",
+  "version": "0.2.2",
   "description": "手绘讲解视频工作台：whiteboard_project 制作进度持久化（6 阶段管线）+ whiteboard_storyboard 分镜样例查询与结构校验。侧栏制作进度面板。",
   "license": "MIT",
   "type": "module",

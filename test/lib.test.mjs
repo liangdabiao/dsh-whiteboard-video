@@ -1,9 +1,10 @@
-// 快照合规与 addendum 单测。零 dsh 依赖、零网络。
+// 插件单测：技能快照合规、addendum、制作清单、分镜校验、浏览器半边产物。零 dsh 依赖、零网络。
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { runInNewContext } from 'node:vm'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SKILL_DIR = join(ROOT, 'skills', 'whiteboard-teacher-video')
@@ -136,6 +137,24 @@ test('data: 制作清单 init/冲突/更新/清空 + 分镜校验', () => {
   const good = data.validateStoryboard({ title: 't', pages: [{ narration: '你好', elements: [] }, { narration: '世界', content: 'x' }] })
   assert.equal(good.ok, true)
   assert.equal(good.stats.narrated, 2)
+  // 技能规范：pages[].say + pages[].beats[]
+  const canonical = data.validateStoryboard({
+    title: 't',
+    pages: [{ say: '第一句口播', beats: [{ at: 'c0', object: '火车', action: '驶过站台' }] }],
+  })
+  assert.equal(canonical.ok, true)
+  assert.equal(canonical.stats.narrated, 1)
+  assert.equal(canonical.stats.beats, 1)
+  // 空数组不算画面（避免空壳页面蒙混过关）
+  const emptyBeats = data.validateStoryboard({ title: 't', pages: [{ say: '口播', beats: [] }] })
+  assert.equal(emptyBeats.ok, true)
+  assert.ok(emptyBeats.warnings.some((w) => w.includes('没有画面描述')))
+  // 内置样例（技能真实产物）必须全部判为通过
+  for (const f of readdirSync(join(SKILL_DIR, 'assets')).filter((x) => /^storyboard-.*\.json$/.test(x))) {
+    const sample = JSON.parse(readFileSync(join(SKILL_DIR, 'assets', f), 'utf8'))
+    const verdict = data.validateStoryboard(sample)
+    assert.equal(verdict.ok, true, `${f} 应通过：${verdict.errors.join('；')}`)
+  }
 })
 
 test('host: 2 个工具 schema + project/storyboard 全链路', async () => {
@@ -144,9 +163,12 @@ test('host: 2 个工具 schema + project/storyboard 全链路', async () => {
     assert.ok(tool.description.length > 30)
   }
   await assert.rejects(() => host.whiteboardProjectTool.execute({ action: 'list', bogus: 1 }), /未知参数/)
+  let skillProvider
   host.apply(
-    { effect: (fn) => { try { fn() } catch {} }, tools: { register: () => {} }, skills: { registerProvider: () => {} }, webServer: { register: () => {} } },
+    { effect: (fn) => { try { fn() } catch {} }, tools: { register: () => {} }, skills: { registerProvider: (factory) => { skillProvider = factory() } }, webServer: { register: () => {} } },
     {})
+  const skills = await skillProvider.list()
+  assert.ok(skills.some((s) => s.name === 'whiteboard-teacher-video'), '应注册手绘讲解视频技能')
   const init = await host.whiteboardProjectTool.execute({ action: 'init', title: '勾股定理' })
   assert.equal(init.ok, true)
   const st = await host.whiteboardProjectTool.execute({ action: 'status', index: 1, status: 'done', note: '脚本好了' })
@@ -163,3 +185,94 @@ test('host: 2 个工具 schema + project/storyboard 全链路', async () => {
   const noConfirm = await host.whiteboardProjectTool.execute({ action: 'clear' })
   assert.equal(noConfirm.ok, false)
 })
+
+// ── 浏览器半边产物：ModuleLoader 包装、重复执行守卫、面板注册 ──
+test('dist/client.js：重复执行守卫 + 面板注册（免浏览器）', () => {
+  const code = readFileSync(join(ROOT, 'dist', 'client.js'), 'utf8')
+  assert.ok(code.startsWith('window.__dshLoadedIds'), '产物应带重复执行守卫（防 web boot 二次执行崩溃）')
+  const react = {
+    createElement: (type, props, ...children) => ({ type, props, children }),
+    useState: (value) => [value, () => {}],
+    useEffect: () => {},
+  }
+  const loaded = []
+  const sandbox = { window: { __ModuleLoader__: { load: (entry) => loaded.push(entry) } }, Set, console }
+  runInNewContext(code, sandbox)
+  assert.equal(loaded.length, 1, '首次执行应注册一次')
+  runInNewContext(code, sandbox)
+  assert.equal(loaded.length, 1, '重复执行应被守卫跳过，不能二次注册')
+
+  const mod = loaded[0].factory((name) => {
+    if (name === 'react') return react
+    throw new Error(`产物 require 了白名单外的模块：${name}`)
+  })
+  assert.equal(mod.isPlugin, true)
+  assert.deepEqual(Array.from(mod.inject), ['slots', 'uiWorkspace'])
+
+  const registered = []
+  const starts = []
+  const ctx = {
+    uiWorkspace: { startSession: (_id, opts) => starts.push(opts) },
+    slots: {
+      inject: (_name, fn) => fn(),
+      register: (spec, comp) => registered.push({ spec, comp }),
+    },
+  }
+  mod.apply(ctx, {})
+  assert.equal(registered.length, 2, '应有侧栏图标 + 主面板两次注册')
+  const [icon, panel] = registered
+  assert.equal(icon.spec.name, 'sidebar.panellist')
+  assert.equal(icon.spec.id, 'whiteboard-video')
+  assert.equal(icon.spec.label(), '手绘视频')
+  assert.equal(panel.spec.name, 'main')
+  assert.equal(panel.spec.key, 'whiteboard-video')
+  for (const r of registered) assert.equal(typeof r.comp, 'function')
+
+  // 面板首屏是「工具选择」：把组件树渲染一遍，点按钮应把指令填进新对话（不自动发送）
+  const tree = renderTree(panel.comp({}))
+  const texts = collectText(tree)
+  assert.ok(texts.includes('三个工具怎么选'), '应有「三个工具怎么选」')
+  assert.ok(texts.includes('三种视频怎么选'), '应有「三种视频怎么选」')
+  const buttons = collectButtons(tree)
+  const cta = buttons.find((b) => String(b.props.title || '').startsWith('填进对话'))
+  assert.ok(cta, '工具选择页应有填进对话的按钮')
+  cta.props.onClick()
+  assert.equal(starts.length, 1)
+  assert.equal(starts[0].whenDraftExists, 'replace')
+  assert.match(starts[0].prompt, /曹冲称象/)
+  const validate = buttons.find((b) => String(b.props.title || '').includes('校验这个分镜 JSON'))
+  assert.ok(validate, '应有一键校验分镜的按钮')
+  validate.props.onClick()
+  assert.equal(starts[1].prompt, '校验这个分镜 JSON：')
+  const github = buttons.find((b) => String(b.props.title || '').includes('给这个 GitHub 项目做一个'))
+  assert.ok(github, '应有 GitHub 项目介绍片按钮')
+  github.props.onClick()
+  assert.match(starts[2].prompt, /GitHub 项目/)
+})
+
+function collectText(node, out = []) {
+  if (typeof node === 'string' || typeof node === 'number') out.push(String(node))
+  else if (Array.isArray(node)) node.forEach((child) => collectText(child, out))
+  else if (node && typeof node === 'object') (node.children || []).forEach((child) => collectText(child, out))
+  return out
+}
+
+// 把 React 元素树展开到可点击的按钮节点（只用于测试，不依赖真实渲染器）
+function renderTree(node) {
+  if (node === null || node === undefined || typeof node === 'boolean') return node
+  if (typeof node === 'string' || typeof node === 'number') return node
+  if (Array.isArray(node)) return node.map(renderTree)
+  if (typeof node.type === 'function') return renderTree(node.type(node.props || {}))
+  return { type: node.type, props: node.props || {}, children: (node.children || []).map(renderTree) }
+}
+
+function collectButtons(node, out = []) {
+  if (!node || typeof node !== 'object') return out
+  if (Array.isArray(node)) {
+    node.forEach((child) => collectButtons(child, out))
+    return out
+  }
+  if (node.type === 'button') out.push(node)
+  ;(node.children || []).forEach((child) => collectButtons(child, out))
+  return out
+}
