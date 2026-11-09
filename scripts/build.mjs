@@ -9,29 +9,21 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const PLUGIN_ID = pkg.name
 
-// 注册包装：只吞掉「duplicate factory registration」，不阻断重新注册。
-// 背景：宿主在「预加载 + 延迟加载」或 disable→enable 时会重新执行同一个 bundle，
-// client-modules 会以 duplicate factory registration 抛错并让整个 web boot 失败。
-// 注意：不能用 `if (!loadedIds.has(id))` 直接跳过——插件被 disable→enable 后宿主会
-// 重新执行 bundle，跳过会让面板永久回不来（实测踩过，左侧图标消失）。
-// 这里改为：调用 load，若只是重复注册就忽略；若 factory 已被 invalidate，load 会正常
-// 重新注册，面板恢复。
+// 必须是裸 `window.__ModuleLoader__.load({...})`，不能包函数/IIFE！
+// DSH client-modules 只会激活「脚本顶层直接调用 load」的 bundle；包一层守卫/包装后，
+// bundle 会被下载但 apply 永不执行，侧栏面板就不出现（实测：包 wrapper → 无图标；
+// 改回裸 load → apply 立即执行）。
 const banner =
-  `(function () {\n` +
-  `  const register = (entry) => {\n` +
-  `    try { window.__ModuleLoader__.load(entry) }\n` +
-  `    catch (err) { if (!err || !/duplicate factory registration/.test(String((err && err.message) || err))) throw err }\n` +
-  `  };\n` +
-  `  register({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {\n` +
+  `window.__ModuleLoader__.load({ id: ${JSON.stringify(PLUGIN_ID)}, factory: (require) => {` +
   ` const module = { exports: {} }; const exports = module.exports;`
-const footer = ' return module.exports; } }); })();\n'
+const footer = ' return module.exports; } });'
 
 const CLIENT_EXTERNALS = ['react', 'react/jsx-runtime', 'react-dom', 'react-dom/client']
 
 function checkBundle() {
   const code = readFileSync(join(root, 'dist/client.js'), 'utf8')
-  if (!code.startsWith('(function () {') || !code.includes('duplicate factory registration')) {
-    throw new Error('client 产物缺少重复注册容错包装（disable→enable 后需要能重新注册）')
+  if (!code.startsWith('window.__ModuleLoader__.load(')) {
+    throw new Error('client 产物必须以裸 window.__ModuleLoader__.load 开头（包 wrapper 会导致宿主不激活）')
   }
   const requires = [...code.matchAll(/\brequire\(\s*["']([^"']+)["']\s*\)/g)].map((m) => m[1])
   const bad = requires.filter((spec) => !CLIENT_EXTERNALS.includes(spec))

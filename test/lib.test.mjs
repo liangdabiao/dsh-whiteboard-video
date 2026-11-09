@@ -187,35 +187,18 @@ test('host: 2 个工具 schema + project/storyboard 全链路', async () => {
 })
 
 // ── 浏览器半边产物：ModuleLoader 包装、重复执行守卫、面板注册 ──
-test('dist/client.js：重复注册容错 + 面板注册（免浏览器）', () => {
+test('dist/client.js：裸 load 注册 + 面板注册（免浏览器）', () => {
   const code = readFileSync(join(ROOT, 'dist', 'client.js'), 'utf8')
-  assert.ok(code.startsWith('(function () {'), '产物应带注册包装')
-  assert.ok(code.includes('duplicate factory registration'), '应只吞掉重复注册错误，不能永久跳过')
+  assert.ok(code.startsWith('window.__ModuleLoader__.load('), '产物必须是裸 load（包 wrapper 会导致宿主不激活）')
   const react = {
     createElement: (type, props, ...children) => ({ type, props, children }),
     useState: (value) => [value, () => {}],
     useEffect: () => {},
   }
   const loaded = []
-  const sandbox = {
-    window: {
-      __ModuleLoader__: {
-        load: (entry) => {
-          if (loaded.some((e) => e.id === entry.id)) {
-            throw new Error(`client-modules: duplicate factory registration for "${entry.id}"`)
-          }
-          loaded.push(entry)
-        },
-      },
-    },
-    Set,
-    console,
-  }
+  const sandbox = { window: { __ModuleLoader__: { load: (entry) => loaded.push(entry) } }, Set, console }
   runInNewContext(code, sandbox)
   assert.equal(loaded.length, 1, '首次执行应注册一次')
-  // disable→enable 场景：宿主会再次执行 bundle；不能抛错，且 factory 仍在
-  assert.doesNotThrow(() => runInNewContext(code, sandbox))
-  assert.equal(loaded.length, 1, '重复执行应被容错，不应注册第二份')
 
   const mod = loaded[0].factory((name) => {
     if (name === 'react') return react

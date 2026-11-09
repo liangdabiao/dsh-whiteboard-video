@@ -255,6 +255,8 @@ const styles = {
 }
 
 function apply(ctx) {
+  // 启动打点：证明浏览器半边被宿主真正 apply（宿主写 client-boot.log）。
+  try { fetch(BASE + '/api/health').catch(() => {}) } catch { /* 不影响面板 */ }
   // 与其它插件同一套入口：只填草稿，不自动发送
   startPrompt = (prompt) => {
     try {
