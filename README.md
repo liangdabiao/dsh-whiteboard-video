@@ -39,7 +39,7 @@ npm install && npm test && npm run selftest && npm run build
 ## 安装
 
 ```bash
-dsh plugin --profile web add dsh-whiteboard-video
+dsh plugin --profile web add https://github.com/liangdabiao/dsh-whiteboard-video
 ```
 
 ## 许可
